@@ -1,5 +1,5 @@
 [package]
-name = "project-name"
+name = "zitadel-token"
 version = "0.1.0"
 authors = []
 edition = "2021"
@@ -7,6 +7,11 @@ resolver = "2"
 publish = ["famedly"]
 
 [dependencies]
+serde = "1.0.215"
+serde_json = "1.0.133"
+time = "0.3.36"
+thiserror = "1.0.61"
+josekit = { git = "https://github.com/famedly/josekit-rs.git", rev = "5941d0f39d034e9c6d96dc47f391926f5e3038fa" }
 
 [lints.rust]
 dead_code = "warn"
@@ -97,3 +102,6 @@ unwrap_used = "warn"
 used_underscore_binding = "warn"
 useless_let_if_seq = "warn"
 verbose_file_reads = "warn"
+
+[dev-dependencies]
+anyhow = "1.0.93"
