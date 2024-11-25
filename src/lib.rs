@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use josekit::jwt::JwtPayload;
-use serde::Deserialize;
+use josekit::{jwk::Jwk, jws::JwsHeader, jwt::JwtPayload};
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 /// Struct that represents a JWT from Zitadel
@@ -28,7 +28,7 @@ pub struct ZitadelJWT {
 }
 
 /// User roles available on Zitadel
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Hash, Clone)]
 #[allow(missing_docs)]
 pub enum ZitadelUserRole {
 	TimProviderApi,
@@ -87,12 +87,78 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 	}
 }
 
+/// Enum for error converting ZitadelJWT into JwtPayload
+#[derive(Debug, thiserror::Error)]
+#[allow(missing_docs)]
+pub enum ToJwtPayloadError {
+	#[error("Error serializing roles: {0}")]
+	SerializeRoles(#[from] serde_json::Error),
+	#[error("Error inserting into JwtPayload claim: {0}")]
+	InsertClaim(#[from] josekit::JoseError),
+}
+
+impl TryFrom<ZitadelJWT> for JwtPayload {
+	type Error = ToJwtPayloadError;
+	fn try_from(value: ZitadelJWT) -> Result<Self, Self::Error> {
+		let mut paylaod = JwtPayload::new();
+		paylaod.set_issuer(value.iss);
+		paylaod.set_expires_at(&value.exp.into());
+		paylaod.set_not_before(&value.nbf.into());
+		paylaod.set_subject(value.sub);
+
+		// This should never fail
+		let map = serde_json::to_value(value.roles)?;
+
+		paylaod.set_claim("roles", Some(map))?;
+		paylaod
+			.set_claim("homeserver", Some(serde_json::Value::String(value.homeserver.clone())))?;
+		paylaod.set_claim(
+			"professionOID",
+			Some(serde_json::Value::Number(value.profession_oid.into())),
+		)?;
+		paylaod
+			.set_claim("idNummer", Some(serde_json::Value::Number(value.telematik_id.into())))?;
+
+		Ok(paylaod)
+	}
+}
+
+/// Enum for errors on ZitadelJWT functions
+#[derive(Debug, thiserror::Error)]
+pub enum ZitadelJWTError {
+	/// Signing private key missing kid
+	#[error("Private key is missing kid")]
+	MissingKeyId,
+	/// Josekit error during creation of jwt
+	#[error("Error creating the token: {0}")]
+	JosekitError(#[from] josekit::JoseError),
+	/// Error converting to a josekit::JwtPayload
+	#[error("Error converting to JwtPayload: {0}")]
+	ToJwtPayloadError(#[from] ToJwtPayloadError),
+}
+
+impl ZitadelJWT {
+	/// Converts the zitadel token to jwt
+	pub fn to_jwt(&self, private_key: &Jwk) -> Result<String, ZitadelJWTError> {
+		let mut header = JwsHeader::new();
+		header.set_algorithm("RS256");
+		header.set_token_type("JWT");
+		header.set_key_id(private_key.key_id().ok_or(ZitadelJWTError::MissingKeyId)?);
+
+		let signer = josekit::jws::RS256.signer_from_jwk(private_key)?;
+
+		josekit::jwt::encode_with_signer(&self.clone().try_into()?, &header, &signer)
+			.map_err(ZitadelJWTError::JosekitError)
+	}
+}
+
 #[cfg(test)]
 mod tests {
+	#![allow(clippy::expect_used)]
 	use std::collections::HashMap;
 
 	use anyhow::{Ok, Result};
-	use josekit::{jwt::JwtPayload, Map};
+	use josekit::{jwk::Jwk, jws::RS256, jwt::JwtPayload, Map};
 	use time::OffsetDateTime;
 
 	use crate::{ZitadelJWT, ZitadelUserRole};
@@ -155,6 +221,53 @@ mod tests {
 		};
 
 		assert_eq!(parsed_toke, token);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_to_jwt() -> Result<()> {
+		let parsed_toke: Map<String, serde_json::Value> = serde_json::from_str(
+			r#"{
+				"amr": [
+					"pwd"
+				],
+				"at_hash": "IUt5Flxee-XJFqp0ei3jJw",
+				"aud": [
+					"292434404779753474",
+					"regservice"
+				],
+				"auth_time": 1731573935,
+				"azp": "regservice",
+				"client_id": "regservice",
+				"exp": 1731573935,
+				"nbf": 1731563935,
+				"homeserver": "test.com",
+				"iat": 1731573935,
+				"idNummer": 123456,
+				"iss": "https://zitadel.staging.famedly.de",
+				"professionOID": 123456,
+				"roles": {
+							"OrgAdmin": ["292434404779753474"],
+							"FederationlistApi": ["292434404779753474"],
+							"TimProviderApi": ["292434404779753474"],
+							"Provider": ["292434404779753474"]
+						},
+				"sub": "293728322112716802"
+		}"#,
+		)?;
+		let parsed_toke: ZitadelJWT = JwtPayload::from_map(parsed_toke)?.try_into()?;
+		let mut private_key =
+			Jwk::generate_rsa_key(2048).expect("Error generating token private key");
+		private_key.set_key_id("123456");
+		let jwt = parsed_toke.to_jwt(&private_key)?;
+
+		let verifier = RS256.verifier_from_jwk(&private_key.to_public_key()?)?;
+		let (payload, _) = josekit::jwt::decode_with_verifier(jwt, &verifier)?;
+
+		let decoded_token: ZitadelJWT = payload.try_into()?;
+
+		assert_eq!(parsed_toke, decoded_token);
 
 		Ok(())
 	}
