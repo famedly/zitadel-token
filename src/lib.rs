@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use josekit::{jwk::Jwk, jws::JwsHeader, jwt::JwtPayload};
+use josekit::{jwk::Jwk, jws::JwsHeader, jwt::JwtPayload, Value};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -21,6 +21,8 @@ pub struct ZitadelJWT {
 	pub roles: HashMap<ZitadelUserRole, Vec<String>>,
 	/// Matrix Homeserver
 	pub homeserver: String,
+	/// Matrix localpart
+	pub localpart: String,
 	/// Profession oid
 	pub profession_oid: i64,
 	/// TelematikId
@@ -38,52 +40,34 @@ pub enum ZitadelUserRole {
 }
 
 /// Enum for error parsing a JwtPayload into a ZitadelJWT
-#[allow(missing_docs)]
-#[derive(Debug, thiserror::Error)]
-pub enum JWTError {
-	#[error("Token missing iss claim")]
-	MissingIss,
-	#[error("Token missing exp claim")]
-	MissingExp,
-	#[error("Token missing nbf claim")]
-	MissingNbf,
-	#[error("Token missing sub claim")]
-	MissingSub,
-	#[error("Token missing roles claim")]
-	MissingRoles,
-	#[error("Token missing homeserver claim")]
-	MissingHomeserver,
-	#[error("Token missing professionOID claim")]
-	MissingProfessionOid,
-	#[error("Token missing idNummer claim")]
-	MissingTelematikId,
-}
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Deserialize, Serialize, thiserror::Error)]
+#[error("Missing or invalid claim `{0}`")]
+#[repr(transparent)]
+pub struct MissingClaim(pub &'static str);
+pub use MissingClaim as JWTError;
 
 impl TryFrom<JwtPayload> for ZitadelJWT {
 	type Error = JWTError;
 	fn try_from(value: JwtPayload) -> Result<Self, Self::Error> {
-		use JWTError::*;
-		let iss = value.issuer().map(ToOwned::to_owned).ok_or(MissingIss)?;
-		let exp: OffsetDateTime = value.expires_at().ok_or(MissingExp)?.into();
-		let nbf: OffsetDateTime = value.not_before().ok_or(MissingNbf)?.into();
-		let sub = value.subject().map(ToOwned::to_owned).ok_or(MissingSub)?;
+		fn claim<X>(
+			value: &JwtPayload,
+			claim: &'static str,
+			f: impl Fn(&Value) -> Option<X>,
+		) -> Result<X, MissingClaim> {
+			value.claim(claim).and_then(f).ok_or(MissingClaim(claim))
+		}
+		Ok(Self {
+			iss: value.issuer().map(ToOwned::to_owned).ok_or(MissingClaim("iss"))?,
+			exp: value.expires_at().ok_or(MissingClaim("exp"))?.into(),
+			nbf: value.not_before().ok_or(MissingClaim("nbf"))?.into(),
+			sub: value.subject().map(ToOwned::to_owned).ok_or(MissingClaim("sub"))?,
 
-		let roles: HashMap<ZitadelUserRole, Vec<String>> = value
-			.claim("roles")
-			.and_then(|roles| serde_json::from_value(roles.clone()).ok())
-			.ok_or(MissingRoles)?;
-		let homeserver =
-			value.claim("homeserver").and_then(|v| v.as_str()).ok_or(MissingHomeserver)?.to_owned();
-		let profession_oid = value
-			.claim("professionOID")
-			.and_then(serde_json::Value::as_i64)
-			.ok_or(MissingProfessionOid)?;
-		let telematik_id = value
-			.claim("idNummer")
-			.and_then(serde_json::Value::as_i64)
-			.ok_or(MissingTelematikId)?;
-
-		Ok(Self { iss, exp, nbf, sub, roles, homeserver, profession_oid, telematik_id })
+			roles: claim(&value, "roles", |v| serde_json::from_value(v.clone()).ok())?,
+			homeserver: claim(&value, "homeserver", |v| Some(v.as_str()?.into()))?,
+			localpart: claim(&value, "localpart", |v| Some(v.as_str()?.into()))?,
+			profession_oid: claim(&value, "professionOID", Value::as_i64)?,
+			telematik_id: claim(&value, "idNummer", Value::as_i64)?,
+		})
 	}
 }
 
@@ -106,18 +90,11 @@ impl TryFrom<ZitadelJWT> for JwtPayload {
 		paylaod.set_not_before(&value.nbf.into());
 		paylaod.set_subject(value.sub);
 
-		// This should never fail
-		let map = serde_json::to_value(value.roles)?;
-
-		paylaod.set_claim("roles", Some(map))?;
-		paylaod
-			.set_claim("homeserver", Some(serde_json::Value::String(value.homeserver.clone())))?;
-		paylaod.set_claim(
-			"professionOID",
-			Some(serde_json::Value::Number(value.profession_oid.into())),
-		)?;
-		paylaod
-			.set_claim("idNummer", Some(serde_json::Value::Number(value.telematik_id.into())))?;
+		paylaod.set_claim("roles", Some(serde_json::to_value(value.roles)?))?;
+		paylaod.set_claim("homeserver", Some(value.homeserver.into()))?;
+		paylaod.set_claim("localpart", Some(value.localpart.into()))?;
+		paylaod.set_claim("professionOID", Some(value.profession_oid.into()))?;
+		paylaod.set_claim("idNummer", Some(value.telematik_id.into()))?;
 
 		Ok(paylaod)
 	}
@@ -159,6 +136,7 @@ mod tests {
 
 	use anyhow::{Ok, Result};
 	use josekit::{jwk::Jwk, jws::RS256, jwt::JwtPayload, Map};
+	use serde_json::{from_value, json, Value};
 	use time::OffsetDateTime;
 
 	use crate::{ZitadelJWT, ZitadelUserRole};
@@ -170,39 +148,43 @@ mod tests {
 		assert!(default_token.is_err());
 	}
 
+	#[allow(clippy::unwrap_used)]
+	fn payload_fixture() -> Map<String, Value> {
+		from_value(json!({
+			"amr": [
+				"pwd"
+			],
+			"at_hash": "IUt5Flxee-XJFqp0ei3jJw",
+			"aud": [
+				"292434404779753474",
+				"regservice"
+			],
+			"auth_time": 1731573935,
+			"azp": "regservice",
+			"client_id": "regservice",
+			"exp": 1731573935,
+			"nbf": 1731563935,
+			"homeserver": "test.com",
+			"localpart": "bobby",
+			"iat": 1731573935,
+			"idNummer": 123456,
+			"iss": "https://zitadel.staging.famedly.de",
+			"professionOID": 123456,
+			"roles": {
+				"OrgAdmin": ["292434404779753474"],
+				"FederationlistApi": ["292434404779753474"],
+				"TimProviderApi": ["292434404779753474"],
+				"Provider": ["292434404779753474"]
+			},
+			"sub": "293728322112716802"
+		}))
+		.unwrap()
+	}
+
 	#[test]
 	#[allow(clippy::unreadable_literal)]
 	fn test_simple_parse() -> Result<()> {
-		let parsed_toke: Map<String, serde_json::Value> = serde_json::from_str(
-			r#"{
-				"amr": [
-					"pwd"
-				],
-				"at_hash": "IUt5Flxee-XJFqp0ei3jJw",
-				"aud": [
-					"292434404779753474",
-					"regservice"
-				],
-				"auth_time": 1731573935,
-				"azp": "regservice",
-				"client_id": "regservice",
-				"exp": 1731573935,
-				"nbf": 1731563935,
-				"homeserver": "test.com",
-				"iat": 1731573935,
-				"idNummer": 123456,
-				"iss": "https://zitadel.staging.famedly.de",
-				"professionOID": 123456,
-				"roles": {
-							"OrgAdmin": ["292434404779753474"],
-							"FederationlistApi": ["292434404779753474"],
-							"TimProviderApi": ["292434404779753474"],
-							"Provider": ["292434404779753474"]
-						},
-				"sub": "293728322112716802"
-		}"#,
-		)?;
-		let parsed_toke: ZitadelJWT = JwtPayload::from_map(parsed_toke)?.try_into()?;
+		let parsed_toke: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
 
 		let token = ZitadelJWT {
 			iss: "https://zitadel.staging.famedly.de".to_owned(),
@@ -216,6 +198,7 @@ mod tests {
 				(ZitadelUserRole::Provider, vec!["292434404779753474".to_owned()]),
 			]),
 			homeserver: "test.com".to_owned(),
+			localpart: "bobby".to_owned(),
 			profession_oid: 123456,
 			telematik_id: 123456,
 		};
@@ -227,36 +210,7 @@ mod tests {
 
 	#[test]
 	fn test_to_jwt() -> Result<()> {
-		let parsed_toke: Map<String, serde_json::Value> = serde_json::from_str(
-			r#"{
-				"amr": [
-					"pwd"
-				],
-				"at_hash": "IUt5Flxee-XJFqp0ei3jJw",
-				"aud": [
-					"292434404779753474",
-					"regservice"
-				],
-				"auth_time": 1731573935,
-				"azp": "regservice",
-				"client_id": "regservice",
-				"exp": 1731573935,
-				"nbf": 1731563935,
-				"homeserver": "test.com",
-				"iat": 1731573935,
-				"idNummer": 123456,
-				"iss": "https://zitadel.staging.famedly.de",
-				"professionOID": 123456,
-				"roles": {
-							"OrgAdmin": ["292434404779753474"],
-							"FederationlistApi": ["292434404779753474"],
-							"TimProviderApi": ["292434404779753474"],
-							"Provider": ["292434404779753474"]
-						},
-				"sub": "293728322112716802"
-		}"#,
-		)?;
-		let parsed_toke: ZitadelJWT = JwtPayload::from_map(parsed_toke)?.try_into()?;
+		let parsed_toke: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
 		let mut private_key =
 			Jwk::generate_rsa_key(2048).expect("Error generating token private key");
 		private_key.set_key_id("123456");
