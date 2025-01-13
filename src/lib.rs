@@ -86,21 +86,21 @@ pub enum ToJwtPayloadError {
 impl TryFrom<ZitadelJWT> for JwtPayload {
 	type Error = ToJwtPayloadError;
 	fn try_from(value: ZitadelJWT) -> Result<Self, Self::Error> {
-		let mut paylaod = JwtPayload::new();
-		paylaod.set_issuer(value.iss);
-		paylaod.set_expires_at(&value.exp.into());
+		let mut payload = JwtPayload::new();
+		payload.set_issuer(value.iss);
+		payload.set_expires_at(&value.exp.into());
 		if let Some(nbf) = value.nbf {
-			paylaod.set_not_before(&nbf.into());
+			payload.set_not_before(&nbf.into());
 		}
-		paylaod.set_subject(value.sub);
+		payload.set_subject(value.sub);
 
-		paylaod.set_claim("roles", Some(serde_json::to_value(value.roles)?))?;
-		paylaod.set_claim("homeserver", Some(value.homeserver.into()))?;
-		paylaod.set_claim("localpart", Some(value.localpart.into()))?;
-		paylaod.set_claim("professionOID", Some(value.profession_oid.into()))?;
-		paylaod.set_claim("idNummer", Some(value.telematik_id.into()))?;
+		payload.set_claim("roles", Some(serde_json::to_value(value.roles)?))?;
+		payload.set_claim("homeserver", Some(value.homeserver.into()))?;
+		payload.set_claim("localpart", Some(value.localpart.into()))?;
+		payload.set_claim("professionOID", Some(value.profession_oid.into()))?;
+		payload.set_claim("idNummer", Some(value.telematik_id.into()))?;
 
-		Ok(paylaod)
+		Ok(payload)
 	}
 }
 
@@ -193,7 +193,7 @@ mod tests {
 	#[test]
 	#[allow(clippy::unreadable_literal)]
 	fn test_simple_parse() -> Result<()> {
-		let parsed_toke: ZitadelJWT = JwtPayload::from_map(payload_fixture(true))?.try_into()?;
+		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture(true))?.try_into()?;
 
 		let token = ZitadelJWT {
 			iss: "https://zitadel.staging.famedly.de".to_owned(),
@@ -212,14 +212,14 @@ mod tests {
 			telematik_id: 123456,
 		};
 
-		assert_eq!(parsed_toke, token);
+		assert_eq!(parsed_token, token);
 
 		Ok(())
 	}
 
 	#[test]
 	fn test_simple_parse_without_nbf() -> Result<()> {
-		let parsed_toke: ZitadelJWT = JwtPayload::from_map(payload_fixture(false))?.try_into()?;
+		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture(false))?.try_into()?;
 
 		let token = ZitadelJWT {
 			iss: "https://zitadel.staging.famedly.de".to_owned(),
@@ -238,25 +238,25 @@ mod tests {
 			telematik_id: 123456,
 		};
 
-		assert_eq!(parsed_toke, token);
+		assert_eq!(parsed_token, token);
 
 		Ok(())
 	}
 
 	#[test]
 	fn test_to_jwt() -> Result<()> {
-		let parsed_toke: ZitadelJWT = JwtPayload::from_map(payload_fixture(true))?.try_into()?;
+		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture(true))?.try_into()?;
 		let mut private_key =
 			Jwk::generate_rsa_key(2048).expect("Error generating token private key");
 		private_key.set_key_id("123456");
-		let jwt = parsed_toke.to_jwt(&private_key)?;
+		let jwt = parsed_token.to_jwt(&private_key)?;
 
 		let verifier = RS256.verifier_from_jwk(&private_key.to_public_key()?)?;
 		let (payload, _) = josekit::jwt::decode_with_verifier(jwt, &verifier)?;
 
 		let decoded_token: ZitadelJWT = payload.try_into()?;
 
-		assert_eq!(parsed_toke, decoded_token);
+		assert_eq!(parsed_token, decoded_token);
 
 		Ok(())
 	}
