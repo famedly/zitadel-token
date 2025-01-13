@@ -13,10 +13,8 @@ pub struct ZitadelJWT {
 	pub iss: String,
 	/// Token expiration date
 	pub exp: OffsetDateTime,
-	/// Token not before date
-	/// Temporary optional as we are waiting
-	/// for the Zitadel Team to add it to the token
-	pub nbf: Option<OffsetDateTime>,
+	/// Token issued at date
+	pub iat: OffsetDateTime,
 	/// Token subject
 	pub sub: String,
 	/// Map of roles to array of projects ids
@@ -61,7 +59,7 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 		Ok(Self {
 			iss: value.issuer().map(ToOwned::to_owned).ok_or(MissingClaim("iss"))?,
 			exp: value.expires_at().ok_or(MissingClaim("exp"))?.into(),
-			nbf: value.not_before().map(Into::into),
+			iat: value.issued_at().ok_or(MissingClaim("iat"))?.into(),
 			sub: value.subject().map(ToOwned::to_owned).ok_or(MissingClaim("sub"))?,
 
 			roles: claim(&value, "roles", |v| serde_json::from_value(v.clone()).ok())?,
@@ -89,9 +87,7 @@ impl TryFrom<ZitadelJWT> for JwtPayload {
 		let mut payload = JwtPayload::new();
 		payload.set_issuer(value.iss);
 		payload.set_expires_at(&value.exp.into());
-		if let Some(nbf) = value.nbf {
-			payload.set_not_before(&nbf.into());
-		}
+		payload.set_issued_at(&value.iat.into());
 		payload.set_subject(value.sub);
 
 		payload.set_claim("roles", Some(serde_json::to_value(value.roles)?))?;
@@ -153,8 +149,8 @@ mod tests {
 	}
 
 	#[allow(clippy::unwrap_used)]
-	fn payload_fixture(with_nbf: bool) -> Map<String, Value> {
-		let mut map: Map<String, Value> = from_value(json!({
+	fn payload_fixture() -> Map<String, Value> {
+		from_value(json!({
 			"amr": [
 				"pwd"
 			],
@@ -181,50 +177,18 @@ mod tests {
 			},
 			"sub": "293728322112716802"
 		}))
-		.unwrap();
-
-		if with_nbf {
-			map.insert("nbf".to_owned(), Value::Number(1731563935.into()));
-		}
-
-		map
+		.unwrap()
 	}
 
 	#[test]
 	#[allow(clippy::unreadable_literal)]
 	fn test_simple_parse() -> Result<()> {
-		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture(true))?.try_into()?;
+		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
 
 		let token = ZitadelJWT {
 			iss: "https://zitadel.staging.famedly.de".to_owned(),
 			exp: OffsetDateTime::from_unix_timestamp(1731573935)?,
-			nbf: Some(OffsetDateTime::from_unix_timestamp(1731563935)?),
-			sub: "293728322112716802".to_owned(),
-			roles: HashMap::from([
-				(ZitadelUserRole::OrgAdmin, vec!["292434404779753474".to_owned()]),
-				(ZitadelUserRole::FederationlistApi, vec!["292434404779753474".to_owned()]),
-				(ZitadelUserRole::TimProviderApi, vec!["292434404779753474".to_owned()]),
-				(ZitadelUserRole::Provider, vec!["292434404779753474".to_owned()]),
-			]),
-			homeserver: "test.com".to_owned(),
-			localpart: "bobby".to_owned(),
-			profession_oid: 123456,
-			telematik_id: 123456,
-		};
-
-		assert_eq!(parsed_token, token);
-
-		Ok(())
-	}
-
-	#[test]
-	fn test_simple_parse_without_nbf() -> Result<()> {
-		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture(false))?.try_into()?;
-
-		let token = ZitadelJWT {
-			iss: "https://zitadel.staging.famedly.de".to_owned(),
-			exp: OffsetDateTime::from_unix_timestamp(1731573935)?,
-			nbf: None,
+			iat: OffsetDateTime::from_unix_timestamp(1731573935)?,
 			sub: "293728322112716802".to_owned(),
 			roles: HashMap::from([
 				(ZitadelUserRole::OrgAdmin, vec!["292434404779753474".to_owned()]),
@@ -245,7 +209,7 @@ mod tests {
 
 	#[test]
 	fn test_to_jwt() -> Result<()> {
-		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture(true))?.try_into()?;
+		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
 		let mut private_key =
 			Jwk::generate_rsa_key(2048).expect("Error generating token private key");
 		private_key.set_key_id("123456");
