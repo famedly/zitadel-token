@@ -24,9 +24,9 @@ pub struct ZitadelJWT {
 	/// Matrix localpart
 	pub localpart: String,
 	/// Profession oid
-	pub profession_oid: i64,
+	pub profession_oid: String,
 	/// TelematikId
-	pub telematik_id: i64,
+	pub telematik_id: String,
 }
 
 /// User roles available on Zitadel
@@ -65,8 +65,8 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 			roles: claim(&value, "roles", |v| serde_json::from_value(v.clone()).ok())?,
 			homeserver: claim(&value, "homeserver", |v| Some(v.as_str()?.into()))?,
 			localpart: claim(&value, "localpart", |v| Some(v.as_str()?.into()))?,
-			profession_oid: claim(&value, "professionOID", Value::as_i64)?,
-			telematik_id: claim(&value, "idNummer", Value::as_i64)?,
+			profession_oid: claim(&value, "professionOID", |v| Some(v.as_str()?.into()))?,
+			telematik_id: claim(&value, "idNummer", |v| Some(v.as_str()?.into()))?,
 		})
 	}
 }
@@ -166,9 +166,9 @@ mod tests {
 			"homeserver": "test.com",
 			"localpart": "bobby",
 			"iat": 1731573935,
-			"idNummer": 123456,
+			"idNummer": "1-1a25sd-d529",
 			"iss": "https://zitadel.staging.famedly.de",
-			"professionOID": 123456,
+			"professionOID": "1.2.276.0.76.5.30",
 			"roles": {
 				"OrgAdmin": ["292434404779753474"],
 				"FederationlistApi": ["292434404779753474"],
@@ -198,8 +198,8 @@ mod tests {
 			]),
 			homeserver: "test.com".to_owned(),
 			localpart: "bobby".to_owned(),
-			profession_oid: 123456,
-			telematik_id: 123456,
+			profession_oid: "1.2.276.0.76.5.30".to_owned(),
+			telematik_id: "1-1a25sd-d529".to_owned(),
 		};
 
 		assert_eq!(parsed_token, token);
