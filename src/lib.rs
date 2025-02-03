@@ -21,8 +21,8 @@ pub struct ZitadelJWT {
 	pub roles: HashMap<ZitadelUserRole, Vec<String>>,
 	/// Matrix Homeserver
 	pub homeserver: String,
-	/// Matrix localpart
-	pub localpart: String,
+	/// Matrix localpart, optional because service accounts don't have it
+	pub localpart: Option<String>,
 	/// Profession oid
 	pub profession_oid: String,
 	/// TelematikId
@@ -64,7 +64,7 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 
 			roles: claim(&value, "roles", |v| serde_json::from_value(v.clone()).ok())?,
 			homeserver: claim(&value, "homeserver", |v| Some(v.as_str()?.into()))?,
-			localpart: claim(&value, "localpart", |v| Some(v.as_str()?.into()))?,
+			localpart: value.claim("localpart").and_then(|v| v.as_str().map(ToOwned::to_owned)),
 			profession_oid: claim(&value, "professionOID", |v| Some(v.as_str()?.into()))?,
 			telematik_id: claim(&value, "idNummer", |v| Some(v.as_str()?.into()))?,
 		})
@@ -197,7 +197,35 @@ mod tests {
 				(ZitadelUserRole::Provider, vec!["292434404779753474".to_owned()]),
 			]),
 			homeserver: "test.com".to_owned(),
-			localpart: "bobby".to_owned(),
+			localpart: Some("bobby".to_owned()),
+			profession_oid: "1.2.276.0.76.5.30".to_owned(),
+			telematik_id: "1-1a25sd-d529".to_owned(),
+		};
+
+		assert_eq!(parsed_token, token);
+
+		Ok(())
+	}
+
+	#[test]
+	#[allow(clippy::unreadable_literal)]
+	fn test_simple_parse_no_localpart() -> Result<()> {
+		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
+		let parsed_token = ZitadelJWT { localpart: None, ..parsed_token };
+
+		let token = ZitadelJWT {
+			iss: "https://zitadel.staging.famedly.de".to_owned(),
+			exp: OffsetDateTime::from_unix_timestamp(1731573935)?,
+			iat: OffsetDateTime::from_unix_timestamp(1731573935)?,
+			sub: "293728322112716802".to_owned(),
+			roles: HashMap::from([
+				(ZitadelUserRole::OrgAdmin, vec!["292434404779753474".to_owned()]),
+				(ZitadelUserRole::FederationlistApi, vec!["292434404779753474".to_owned()]),
+				(ZitadelUserRole::TimProviderApi, vec!["292434404779753474".to_owned()]),
+				(ZitadelUserRole::Provider, vec!["292434404779753474".to_owned()]),
+			]),
+			homeserver: "test.com".to_owned(),
+			localpart: None,
 			profession_oid: "1.2.276.0.76.5.30".to_owned(),
 			telematik_id: "1-1a25sd-d529".to_owned(),
 		};
