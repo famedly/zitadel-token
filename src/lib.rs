@@ -17,16 +17,18 @@ pub struct ZitadelJWT {
 	pub iat: OffsetDateTime,
 	/// Token subject
 	pub sub: String,
-	/// Map of roles to array of projects ids
-	pub roles: HashMap<ZitadelUserRole, Vec<String>>,
-	/// Matrix Homeserver
-	pub homeserver: String,
+	/// Homeserver of the project as a single URL
+	pub homeserver: Option<String>,
+	/// Map of project IDs to their homeserver URLs
+	pub homeservers_list: Option<HashMap<String, String>>,
 	/// Matrix localpart, optional because service accounts don't have it
 	pub localpart: Option<String>,
 	/// Profession oid
 	pub profession_oid: String,
 	/// TelematikId
 	pub telematik_id: String,
+	/// Map of roles to array of projects ids
+	pub roles: HashMap<ZitadelUserRole, Vec<String>>,
 }
 
 /// User roles available on Zitadel
@@ -56,29 +58,31 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 		) -> Result<X, MissingClaim> {
 			value.claim(claim).and_then(f).ok_or(MissingClaim(claim))
 		}
+
+		// Parse homeserver entries for different projects
+		let mut homeservers_list = HashMap::new();
+		for (key, value) in value.claims_set() {
+			if key.ends_with(".homeserver") {
+				if let Some(homeserver_url) = value.as_str() {
+					let project_id = key.trim_end_matches(".homeserver").to_owned();
+					homeservers_list.insert(project_id, homeserver_url.to_owned());
+				}
+			}
+		}
+
 		Ok(Self {
 			iss: value.issuer().map(ToOwned::to_owned).ok_or(MissingClaim("iss"))?,
 			exp: value.expires_at().ok_or(MissingClaim("exp"))?.into(),
 			iat: value.issued_at().ok_or(MissingClaim("iat"))?.into(),
 			sub: value.subject().map(ToOwned::to_owned).ok_or(MissingClaim("sub"))?,
-
-			roles: claim(&value, "roles", |v| serde_json::from_value(v.clone()).ok())?,
-			homeserver: claim(&value, "homeserver", |v| Some(v.as_str()?.into()))?,
+			homeserver: value.claim("homeserver").and_then(|v| v.as_str().map(ToOwned::to_owned)),
+			homeservers_list: (!homeservers_list.is_empty()).then_some(homeservers_list),
 			localpart: value.claim("localpart").and_then(|v| v.as_str().map(ToOwned::to_owned)),
 			profession_oid: claim(&value, "professionOID", |v| Some(v.as_str()?.into()))?,
 			telematik_id: claim(&value, "idNummer", |v| Some(v.as_str()?.into()))?,
+			roles: claim(&value, "roles", |v| serde_json::from_value(v.clone()).ok())?,
 		})
 	}
-}
-
-/// Enum for error converting ZitadelJWT into JwtPayload
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum ToJwtPayloadError {
-	#[error("Error serializing roles: {0}")]
-	SerializeRoles(#[from] serde_json::Error),
-	#[error("Error inserting into JwtPayload claim: {0}")]
-	InsertClaim(#[from] josekit::JoseError),
 }
 
 impl TryFrom<ZitadelJWT> for JwtPayload {
@@ -90,14 +94,34 @@ impl TryFrom<ZitadelJWT> for JwtPayload {
 		payload.set_issued_at(&value.iat.into());
 		payload.set_subject(value.sub);
 
-		payload.set_claim("roles", Some(serde_json::to_value(value.roles)?))?;
+		// Set each homeserver entry as a separate claim
+		if let Some(homeservers) = value.homeservers_list {
+			for (project_id, homeserver_url) in homeservers {
+				payload.set_claim(
+					&format!("{}.homeserver", project_id),
+					Some(homeserver_url.into()),
+				)?;
+			}
+		}
+
 		payload.set_claim("homeserver", Some(value.homeserver.into()))?;
 		payload.set_claim("localpart", Some(value.localpart.into()))?;
 		payload.set_claim("professionOID", Some(value.profession_oid.into()))?;
 		payload.set_claim("idNummer", Some(value.telematik_id.into()))?;
+		payload.set_claim("roles", Some(serde_json::to_value(value.roles)?))?;
 
 		Ok(payload)
 	}
+}
+
+/// Enum for error converting ZitadelJWT into JwtPayload
+#[derive(Debug, thiserror::Error)]
+#[allow(missing_docs)]
+pub enum ToJwtPayloadError {
+	#[error("Error serializing roles: {0}")]
+	SerializeRoles(#[from] serde_json::Error),
+	#[error("Error inserting into JwtPayload claim: {0}")]
+	InsertClaim(#[from] josekit::JoseError),
 }
 
 /// Enum for errors on ZitadelJWT functions
@@ -139,7 +163,7 @@ mod tests {
 	use serde_json::{from_value, json, Value};
 	use time::OffsetDateTime;
 
-	use crate::{ZitadelJWT, ZitadelUserRole};
+	use super::*;
 
 	#[test]
 	fn test_parse_default() {
@@ -163,7 +187,10 @@ mod tests {
 			"azp": "regservice",
 			"client_id": "regservice",
 			"exp": 1731573935,
+			"sub": "293728322112716802",
 			"homeserver": "test.com",
+			"my-project.homeserver": "my-project-url.com",
+			"my-other-project.homeserver": "my-other-project-url.com",
 			"localpart": "bobby",
 			"iat": 1731573935,
 			"idNummer": "1-1a25sd-d529",
@@ -175,7 +202,36 @@ mod tests {
 				"TimProviderApi": ["292434404779753474"],
 				"Provider": ["292434404779753474"]
 			},
-			"sub": "293728322112716802"
+		}))
+		.unwrap()
+	}
+
+	#[allow(clippy::unwrap_used)]
+	fn payload_fixture_none_optional() -> Map<String, Value> {
+		from_value(json!({
+			"amr": [
+				"pwd"
+			],
+			"at_hash": "IUt5Flxee-XJFqp0ei3jJw",
+			"aud": [
+				"292434404779753474",
+				"regservice"
+			],
+			"auth_time": 1731573935,
+			"azp": "regservice",
+			"client_id": "regservice",
+			"exp": 1731573935,
+			"sub": "293728322112716802",
+			"iat": 1731573935,
+			"idNummer": "1-1a25sd-d529",
+			"iss": "https://zitadel.staging.famedly.de",
+			"professionOID": "1.2.276.0.76.5.30",
+			"roles": {
+				"OrgAdmin": ["292434404779753474"],
+				"FederationlistApi": ["292434404779753474"],
+				"TimProviderApi": ["292434404779753474"],
+				"Provider": ["292434404779753474"]
+			},
 		}))
 		.unwrap()
 	}
@@ -185,21 +241,27 @@ mod tests {
 	fn test_simple_parse() -> Result<()> {
 		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
 
+		let mut homeservers_list = HashMap::new();
+		homeservers_list.insert("my-project".to_owned(), "my-project-url.com".to_owned());
+		homeservers_list
+			.insert("my-other-project".to_owned(), "my-other-project-url.com".to_owned());
+
 		let token = ZitadelJWT {
 			iss: "https://zitadel.staging.famedly.de".to_owned(),
 			exp: OffsetDateTime::from_unix_timestamp(1731573935)?,
 			iat: OffsetDateTime::from_unix_timestamp(1731573935)?,
 			sub: "293728322112716802".to_owned(),
+			homeserver: Some("test.com".to_owned()),
+			homeservers_list: Some(homeservers_list),
+			localpart: Some("bobby".to_owned()),
+			profession_oid: "1.2.276.0.76.5.30".to_owned(),
+			telematik_id: "1-1a25sd-d529".to_owned(),
 			roles: HashMap::from([
 				(ZitadelUserRole::OrgAdmin, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::FederationlistApi, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::TimProviderApi, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::Provider, vec!["292434404779753474".to_owned()]),
 			]),
-			homeserver: "test.com".to_owned(),
-			localpart: Some("bobby".to_owned()),
-			profession_oid: "1.2.276.0.76.5.30".to_owned(),
-			telematik_id: "1-1a25sd-d529".to_owned(),
 		};
 
 		assert_eq!(parsed_token, token);
@@ -209,25 +271,26 @@ mod tests {
 
 	#[test]
 	#[allow(clippy::unreadable_literal)]
-	fn test_simple_parse_no_localpart() -> Result<()> {
-		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
-		let parsed_token = ZitadelJWT { localpart: None, ..parsed_token };
+	fn test_simple_parse_none_optional() -> Result<()> {
+		let parsed_token: ZitadelJWT =
+			JwtPayload::from_map(payload_fixture_none_optional())?.try_into()?;
 
 		let token = ZitadelJWT {
 			iss: "https://zitadel.staging.famedly.de".to_owned(),
 			exp: OffsetDateTime::from_unix_timestamp(1731573935)?,
 			iat: OffsetDateTime::from_unix_timestamp(1731573935)?,
 			sub: "293728322112716802".to_owned(),
+			homeserver: None,
+			homeservers_list: None,
+			localpart: None,
+			profession_oid: "1.2.276.0.76.5.30".to_owned(),
+			telematik_id: "1-1a25sd-d529".to_owned(),
 			roles: HashMap::from([
 				(ZitadelUserRole::OrgAdmin, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::FederationlistApi, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::TimProviderApi, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::Provider, vec!["292434404779753474".to_owned()]),
 			]),
-			homeserver: "test.com".to_owned(),
-			localpart: None,
-			profession_oid: "1.2.276.0.76.5.30".to_owned(),
-			telematik_id: "1-1a25sd-d529".to_owned(),
 		};
 
 		assert_eq!(parsed_token, token);
