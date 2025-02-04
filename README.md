@@ -1,4 +1,4 @@
-# Project Name
+# Zitadel Token Library
 
 [![rust workflow status][badge-rust-workflow-img]][badge-rust-workflow-url]
 [![docker workflow status][badge-docker-workflow-img]][badge-docker-workflow-url]
@@ -11,17 +11,57 @@
 [badge-docs-main-img]: https://img.shields.io/badge/docs-main-blue
 [badge-docs-main-url]: https://famedly.github.io/rust-library-template/project_name/index.html
 
-Short description of the project.
+This library helps with Zitadel tokens. It can create, read, and convert tokens to the JWT format.
 
-## Lints
+The token holds data that you can then use further in other services.
+
+## Features
+
+- **Token Data:**
+  The token holds custom claims (localpart, profession_oid, telematik_id, roles, homeserver, homeservers_list) in addition to the standard JWT claims (iat, exp, sub, iss).
+
+- **Claims Check:**
+  The library checks if the token has all the required claims. Some claims are optional.
+
+- **Conversions:**
+  The library can change a JWT payload to a Zitadel token and back. It also converts the token to a JWT string.
+
+- **Signing:**
+  It signs the token with a private key using RS256.
+
+## How to Use
+
+1. **Parsing a Token:**
+   You can change a JWT payload into a Zitadel token like this:
+
+   ```rust:src/lib.rs
+   // Convert a JwtPayload into a ZitadelJWT
+   let jwt_payload = JwtPayload::new();
+   let token: ZitadelJWT = jwt_payload.try_into()?;
+   ```
+
+2. **Signing a Token:**
+   You can sign your token with a private key to create a JWT string:
+
+   ```rust:src/lib.rs
+   // Generate a private key and set a key id
+   let mut private_key = Jwk::generate_rsa_key(2048)?;
+   private_key.set_key_id("123456");
+
+   // Convert and sign the ZitadelJWT into a JWT string
+   let jwt = token.to_jwt(&private_key)?;
+   ```
+
+## Tests
 
 ```sh
-cargo clippy --workspace --all-targets
+cargo test
 ```
 
-and this in your IDE:
+## Clippy with nightly
+
 ```sh
-cargo clippy --workspace --all-targets --message-format=json
+cargo +nightly clippy --workspace --all-targets -- -D warnings
 ```
 
 ## Pre-commit usage
