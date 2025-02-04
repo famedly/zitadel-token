@@ -39,6 +39,11 @@ pub enum ZitadelUserRole {
 	FederationlistApi,
 	OrgAdmin,
 	Provider,
+	Admin,
+	User,
+
+	#[serde(untagged)]
+	Unknown(String),
 }
 
 /// Enum for error parsing a JwtPayload into a ZitadelJWT
@@ -200,7 +205,9 @@ mod tests {
 				"OrgAdmin": ["292434404779753474"],
 				"FederationlistApi": ["292434404779753474"],
 				"TimProviderApi": ["292434404779753474"],
-				"Provider": ["292434404779753474"]
+				"Provider": ["292434404779753474"],
+				"Admin": ["292434404779753474"],
+				"User": ["292434404779753474"]
 			},
 		}))
 		.unwrap()
@@ -230,7 +237,42 @@ mod tests {
 				"OrgAdmin": ["292434404779753474"],
 				"FederationlistApi": ["292434404779753474"],
 				"TimProviderApi": ["292434404779753474"],
-				"Provider": ["292434404779753474"]
+				"Provider": ["292434404779753474"],
+				"Admin": ["292434404779753474"],
+				"User": ["292434404779753474"]
+			},
+		}))
+		.unwrap()
+	}
+
+	#[allow(clippy::unwrap_used)]
+	fn payload_fixture_unknown_role() -> Map<String, Value> {
+		from_value(json!({
+			"amr": [
+				"pwd"
+			],
+			"at_hash": "IUt5Flxee-XJFqp0ei3jJw",
+			"aud": [
+				"292434404779753474",
+				"regservice"
+			],
+			"auth_time": 1731573935,
+			"azp": "regservice",
+			"client_id": "regservice",
+			"exp": 1731573935,
+			"sub": "293728322112716802",
+			"iat": 1731573935,
+			"idNummer": "1-1a25sd-d529",
+			"iss": "https://zitadel.staging.famedly.de",
+			"professionOID": "1.2.276.0.76.5.30",
+			"roles": {
+				"OrgAdmin": ["292434404779753474"],
+				"FederationlistApi": ["292434404779753474"],
+				"TimProviderApi": ["292434404779753474"],
+				"Provider": ["292434404779753474"],
+				"Admin": ["292434404779753474"],
+				"User": ["292434404779753474"],
+				"UnknownRole": ["292434404779753474"]
 			},
 		}))
 		.unwrap()
@@ -261,6 +303,8 @@ mod tests {
 				(ZitadelUserRole::FederationlistApi, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::TimProviderApi, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::Provider, vec!["292434404779753474".to_owned()]),
+				(ZitadelUserRole::Admin, vec!["292434404779753474".to_owned()]),
+				(ZitadelUserRole::User, vec!["292434404779753474".to_owned()]),
 			]),
 		};
 
@@ -290,6 +334,8 @@ mod tests {
 				(ZitadelUserRole::FederationlistApi, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::TimProviderApi, vec!["292434404779753474".to_owned()]),
 				(ZitadelUserRole::Provider, vec!["292434404779753474".to_owned()]),
+				(ZitadelUserRole::Admin, vec!["292434404779753474".to_owned()]),
+				(ZitadelUserRole::User, vec!["292434404779753474".to_owned()]),
 			]),
 		};
 
@@ -312,6 +358,21 @@ mod tests {
 		let decoded_token: ZitadelJWT = payload.try_into()?;
 
 		assert_eq!(parsed_token, decoded_token);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_unknown_role() -> Result<()> {
+		let token = JwtPayload::from_map(payload_fixture_unknown_role())?;
+		let parsed_token: ZitadelJWT = token.clone().try_into()?;
+
+		let decoded_token: JwtPayload = parsed_token.try_into()?;
+
+		assert_eq!(
+			token.claim("roles").expect("Missing roles claim"),
+			decoded_token.claim("roles").expect("Missing roles claim")
+		);
 
 		Ok(())
 	}
