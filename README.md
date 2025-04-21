@@ -18,7 +18,7 @@ The token holds data that you can then use further in other services.
 ## Features
 
 - **Token Data:**
-  The token holds custom claims (localpart, profession_oid, telematik_id, roles, homeserver, homeservers_list) in addition to the standard JWT claims (iat, exp, sub, iss).
+  The token holds [custom claims](#jwt-payload-schema) in addition to the standard JWT claims (`iat`, `exp`, `sub`, `iss`).
 
 - **Claims Check:**
   The library checks if the token has all the required claims. Some claims are optional.
@@ -29,12 +29,27 @@ The token holds data that you can then use further in other services.
 - **Signing:**
   It signs the token with a private key using RS256.
 
+## JWT Payload Schema
+
+| Claim              |     | Type                      | Description                                 |
+| ---                | --- | ---                       | ---                                         |
+| `homeserver`       | opt | `String`                  | Homeserver of the project as a single URL   |
+| `homeservers_list` | opt | `Map<String, String>`     | Map of project IDs to their homeserver URLs |
+| `localpart`        | opt | `String`                  | Matrix localpart                            |
+| `profession_oid`   | req | `String`                  | Profession oid                              |
+| `telematik_id`     | req | `String`                  | TelematikId                                 |
+| `roles`            | req | `Map<UserRole, [String]>` | Map of roles to array of projects ids       |
+
+where `UserRole` is an arbitrary string, but some conventional values are: `TimProviderApi`, `FederationlistApi`, `OrgAdmin`, `Provider`, `Admin`, `User`.
+
+`localpart` is optional because service accounts don't have it.
+
 ## How to Use
 
 1. **Parsing a Token:**
    You can change a JWT payload into a Zitadel token like this:
 
-   ```rust:src/lib.rs
+   ```rust
    // Convert a JwtPayload into a ZitadelJWT
    let jwt_payload = JwtPayload::new();
    let token: ZitadelJWT = jwt_payload.try_into()?;
@@ -43,7 +58,7 @@ The token holds data that you can then use further in other services.
 2. **Signing a Token:**
    You can sign your token with a private key to create a JWT string:
 
-   ```rust:src/lib.rs
+   ```rust
    // Generate a private key and set a key id
    let mut private_key = Jwk::generate_rsa_key(2048)?;
    private_key.set_key_id("123456");
