@@ -102,10 +102,8 @@ impl TryFrom<ZitadelJWT> for JwtPayload {
 		// Set each homeserver entry as a separate claim
 		if let Some(homeservers) = value.homeservers_list {
 			for (project_id, homeserver_url) in homeservers {
-				payload.set_claim(
-					&format!("{}.homeserver", project_id),
-					Some(homeserver_url.into()),
-				)?;
+				payload
+					.set_claim(&format!("{project_id}.homeserver"), Some(homeserver_url.into()))?;
 			}
 		}
 
