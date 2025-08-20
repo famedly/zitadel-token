@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use josekit::{jwk::Jwk, jws::JwsHeader, jwt::JwtPayload, Value};
+use josekit::{Value, jwk::Jwk, jws::JwsHeader, jwt::JwtPayload};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -67,11 +67,11 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 		// Parse homeserver entries for different projects
 		let mut homeservers_list = HashMap::new();
 		for (key, value) in value.claims_set() {
-			if key.ends_with(".homeserver") {
-				if let Some(homeserver_url) = value.as_str() {
-					let project_id = key.trim_end_matches(".homeserver").to_owned();
-					homeservers_list.insert(project_id, homeserver_url.to_owned());
-				}
+			if key.ends_with(".homeserver")
+				&& let Some(homeserver_url) = value.as_str()
+			{
+				let project_id = key.trim_end_matches(".homeserver").to_owned();
+				homeservers_list.insert(project_id, homeserver_url.to_owned());
 			}
 		}
 
@@ -162,8 +162,8 @@ mod tests {
 	use std::collections::HashMap;
 
 	use anyhow::{Ok, Result};
-	use josekit::{jwk::Jwk, jws::RS256, jwt::JwtPayload, Map};
-	use serde_json::{from_value, json, Value};
+	use josekit::{Map, jwk::Jwk, jws::RS256, jwt::JwtPayload};
+	use serde_json::{Value, from_value, json};
 	use time::OffsetDateTime;
 
 	use super::*;
