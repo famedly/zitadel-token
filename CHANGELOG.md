@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2025-08-20
+
+### Chore
+
+- Update dependencies and use dependencies only from crates.io
+
 ## [0.1.2] - 2025-08-19
 
 ### CI
