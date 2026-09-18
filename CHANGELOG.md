@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-09-18
+
+### Refactor
+
+- [**breaking**] FC-703 Replace josekit with jsonwebtoken for token signing
+
+### Miscellaneous Tasks
+
+- Update GitHub Action pins
+
 ## [0.1.3] - 2025-08-20
 
 ### Chore
