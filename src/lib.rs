@@ -2,8 +2,10 @@
 
 use std::collections::HashMap;
 
-use josekit::{Value, jwk::Jwk, jws::JwsHeader, jwt::JwtPayload};
+pub use famedly_zitadel_rust_client::v2::token::JwtPayload;
+use jsonwebtoken::{Algorithm, EncodingKey, Header, errors::Error as JwtError};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use time::OffsetDateTime;
 
 /// Struct that represents a JWT from Zitadel
@@ -57,18 +59,20 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 	type Error = JWTError;
 	fn try_from(value: JwtPayload) -> Result<Self, Self::Error> {
 		fn claim<X>(
-			value: &JwtPayload,
+			claims: &HashMap<String, Value>,
 			claim: &'static str,
 			f: impl Fn(&Value) -> Option<X>,
 		) -> Result<X, MissingClaim> {
-			value.claim(claim).and_then(f).ok_or(MissingClaim(claim))
+			claims.get(claim).and_then(f).ok_or(MissingClaim(claim))
 		}
+
+		let claims = value.claims();
 
 		// Parse homeserver entries for different projects
 		let mut homeservers_list = HashMap::new();
-		for (key, value) in value.claims_set() {
+		for (key, claim_value) in claims {
 			if key.ends_with(".homeserver")
-				&& let Some(homeserver_url) = value.as_str()
+				&& let Some(homeserver_url) = claim_value.as_str()
 			{
 				let project_id = key.trim_end_matches(".homeserver").to_owned();
 				homeservers_list.insert(project_id, homeserver_url.to_owned());
@@ -76,16 +80,16 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 		}
 
 		Ok(Self {
-			iss: value.issuer().map(ToOwned::to_owned).ok_or(MissingClaim("iss"))?,
-			exp: value.expires_at().ok_or(MissingClaim("exp"))?.into(),
-			iat: value.issued_at().ok_or(MissingClaim("iat"))?.into(),
-			sub: value.subject().map(ToOwned::to_owned).ok_or(MissingClaim("sub"))?,
-			homeserver: value.claim("homeserver").and_then(|v| v.as_str().map(ToOwned::to_owned)),
+			iss: value.issuer().to_owned(),
+			exp: value.expires_at().ok_or(MissingClaim("exp"))?,
+			iat: value.issued_at().ok_or(MissingClaim("iat"))?,
+			sub: claim(claims, "sub", |v| Some(v.as_str()?.into()))?,
+			homeserver: claims.get("homeserver").and_then(|v| v.as_str().map(ToOwned::to_owned)),
 			homeservers_list: (!homeservers_list.is_empty()).then_some(homeservers_list),
-			localpart: value.claim("localpart").and_then(|v| v.as_str().map(ToOwned::to_owned)),
-			profession_oid: claim(&value, "professionOID", |v| Some(v.as_str()?.into()))?,
-			telematik_id: claim(&value, "idNummer", |v| Some(v.as_str()?.into()))?,
-			roles: claim(&value, "roles", |v| serde_json::from_value(v.clone()).ok())?,
+			localpart: claims.get("localpart").and_then(|v| v.as_str().map(ToOwned::to_owned)),
+			profession_oid: claim(claims, "professionOID", |v| Some(v.as_str()?.into()))?,
+			telematik_id: claim(claims, "idNummer", |v| Some(v.as_str()?.into()))?,
+			roles: claim(claims, "roles", |v| serde_json::from_value(v.clone()).ok())?,
 		})
 	}
 }
@@ -93,27 +97,25 @@ impl TryFrom<JwtPayload> for ZitadelJWT {
 impl TryFrom<ZitadelJWT> for JwtPayload {
 	type Error = ToJwtPayloadError;
 	fn try_from(value: ZitadelJWT) -> Result<Self, Self::Error> {
-		let mut payload = JwtPayload::new();
-		payload.set_issuer(value.iss);
-		payload.set_expires_at(&value.exp.into());
-		payload.set_issued_at(&value.iat.into());
-		payload.set_subject(value.sub);
+		let mut claims = Map::new();
+		claims.insert("iss".to_owned(), Value::String(value.iss));
+		claims.insert("exp".to_owned(), value.exp.unix_timestamp().into());
+		claims.insert("iat".to_owned(), value.iat.unix_timestamp().into());
+		claims.insert("sub".to_owned(), Value::String(value.sub));
 
-		// Set each homeserver entry as a separate claim
 		if let Some(homeservers) = value.homeservers_list {
 			for (project_id, homeserver_url) in homeservers {
-				payload
-					.set_claim(&format!("{project_id}.homeserver"), Some(homeserver_url.into()))?;
+				claims.insert(format!("{project_id}.homeserver"), Value::String(homeserver_url));
 			}
 		}
 
-		payload.set_claim("homeserver", Some(value.homeserver.into()))?;
-		payload.set_claim("localpart", Some(value.localpart.into()))?;
-		payload.set_claim("professionOID", Some(value.profession_oid.into()))?;
-		payload.set_claim("idNummer", Some(value.telematik_id.into()))?;
-		payload.set_claim("roles", Some(serde_json::to_value(value.roles)?))?;
+		claims.insert("homeserver".to_owned(), value.homeserver.into());
+		claims.insert("localpart".to_owned(), value.localpart.into());
+		claims.insert("professionOID".to_owned(), Value::String(value.profession_oid));
+		claims.insert("idNummer".to_owned(), Value::String(value.telematik_id));
+		claims.insert("roles".to_owned(), serde_json::to_value(value.roles)?);
 
-		Ok(payload)
+		Ok(serde_json::from_value(Value::Object(claims))?)
 	}
 }
 
@@ -121,38 +123,37 @@ impl TryFrom<ZitadelJWT> for JwtPayload {
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum ToJwtPayloadError {
-	#[error("Error serializing roles: {0}")]
-	SerializeRoles(#[from] serde_json::Error),
-	#[error("Error inserting into JwtPayload claim: {0}")]
-	InsertClaim(#[from] josekit::JoseError),
+	#[error("Error converting to JwtPayload: {0}")]
+	Serde(#[from] serde_json::Error),
 }
 
 /// Enum for errors on ZitadelJWT functions
 #[derive(Debug, thiserror::Error)]
 pub enum ZitadelJWTError {
-	/// Signing private key missing kid
+	/// Signing key id is missing or empty
 	#[error("Private key is missing kid")]
 	MissingKeyId,
-	/// Josekit error during creation of jwt
+	/// Error creating the JWT
 	#[error("Error creating the token: {0}")]
-	JosekitError(#[from] josekit::JoseError),
-	/// Error converting to a josekit::JwtPayload
+	EncodeError(#[from] JwtError),
+	/// Error converting to a JwtPayload
 	#[error("Error converting to JwtPayload: {0}")]
 	ToJwtPayloadError(#[from] ToJwtPayloadError),
 }
 
 impl ZitadelJWT {
 	/// Converts the zitadel token to jwt
-	pub fn to_jwt(&self, private_key: &Jwk) -> Result<String, ZitadelJWTError> {
-		let mut header = JwsHeader::new();
-		header.set_algorithm("RS256");
-		header.set_token_type("JWT");
-		header.set_key_id(private_key.key_id().ok_or(ZitadelJWTError::MissingKeyId)?);
+	pub fn to_jwt(&self, private_key: &EncodingKey, kid: &str) -> Result<String, ZitadelJWTError> {
+		if kid.is_empty() {
+			return Err(ZitadelJWTError::MissingKeyId);
+		}
 
-		let signer = josekit::jws::RS256.signer_from_jwk(private_key)?;
+		let mut header = Header::new(Algorithm::RS256);
+		header.typ = Some("JWT".to_owned());
+		header.kid = Some(kid.to_owned());
 
-		josekit::jwt::encode_with_signer(&self.clone().try_into()?, &header, &signer)
-			.map_err(ZitadelJWTError::JosekitError)
+		let claims: JwtPayload = self.clone().try_into()?;
+		jsonwebtoken::encode(&header, &claims, private_key).map_err(ZitadelJWTError::EncodeError)
 	}
 }
 
@@ -162,17 +163,41 @@ mod tests {
 	use std::collections::HashMap;
 
 	use anyhow::{Ok, Result};
-	use josekit::{Map, jwk::Jwk, jws::RS256, jwt::JwtPayload};
-	use serde_json::{Value, from_value, json};
+	use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Validation, decode, jwk::Jwk};
+	use serde_json::{Map, Value, from_value, json};
 	use time::OffsetDateTime;
 
 	use super::*;
 
+	const TEST_RSA_PEM: &str = include_str!("../tests/fixtures/test-rsa.key");
+	const TEST_RSA_JWK: &str = include_str!("../tests/fixtures/test-rsa.jwk.key");
+
+	fn jwt_payload(map: Map<String, Value>) -> Result<JwtPayload> {
+		Ok(from_value(Value::Object(map))?)
+	}
+
 	#[test]
 	fn test_parse_default() {
-		let default_token: Result<ZitadelJWT, _> = JwtPayload::new().try_into();
+		assert!(from_value::<JwtPayload>(json!({})).is_err());
+	}
 
-		assert!(default_token.is_err());
+	#[test]
+	fn test_parse_missing_profession_oid() -> Result<()> {
+		let payload = jwt_payload(from_value(json!({
+			"iss": "https://zitadel.staging.famedly.de",
+			"exp": 1731573935,
+			"iat": 1731573935,
+			"sub": "293728322112716802",
+			"idNummer": "1-1a25sd-d529",
+			"roles": {
+				"User": ["292434404779753474"]
+			},
+		}))?)?;
+
+		let token: Result<ZitadelJWT, _> = payload.try_into();
+		assert_eq!(token, Err(MissingClaim("professionOID")));
+
+		Ok(())
 	}
 
 	#[allow(clippy::unwrap_used)]
@@ -279,7 +304,7 @@ mod tests {
 	#[test]
 	#[allow(clippy::unreadable_literal)]
 	fn test_simple_parse() -> Result<()> {
-		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
+		let parsed_token: ZitadelJWT = jwt_payload(payload_fixture())?.try_into()?;
 
 		let mut homeservers_list = HashMap::new();
 		homeservers_list.insert("my-project".to_owned(), "my-project-url.com".to_owned());
@@ -314,8 +339,7 @@ mod tests {
 	#[test]
 	#[allow(clippy::unreadable_literal)]
 	fn test_simple_parse_none_optional() -> Result<()> {
-		let parsed_token: ZitadelJWT =
-			JwtPayload::from_map(payload_fixture_none_optional())?.try_into()?;
+		let parsed_token: ZitadelJWT = jwt_payload(payload_fixture_none_optional())?.try_into()?;
 
 		let token = ZitadelJWT {
 			iss: "https://zitadel.staging.famedly.de".to_owned(),
@@ -344,16 +368,21 @@ mod tests {
 
 	#[test]
 	fn test_to_jwt() -> Result<()> {
-		let parsed_token: ZitadelJWT = JwtPayload::from_map(payload_fixture())?.try_into()?;
-		let mut private_key =
-			Jwk::generate_rsa_key(2048).expect("Error generating token private key");
-		private_key.set_key_id("123456");
-		let jwt = parsed_token.to_jwt(&private_key)?;
+		let parsed_token: ZitadelJWT = jwt_payload(payload_fixture())?.try_into()?;
+		let private_key = EncodingKey::from_rsa_pem(TEST_RSA_PEM.as_bytes())?;
+		let jwt = parsed_token.to_jwt(&private_key, "123456")?;
 
-		let verifier = RS256.verifier_from_jwk(&private_key.to_public_key()?)?;
-		let (payload, _) = josekit::jwt::decode_with_verifier(jwt, &verifier)?;
+		let jwk: Jwk = serde_json::from_str(TEST_RSA_JWK)?;
+		let decoding_key = DecodingKey::from_jwk(&jwk)?;
+		let mut validation = Validation::new(Algorithm::RS256);
+		validation.leeway = 0;
+		validation.validate_exp = false;
+		validation.validate_aud = false;
+		validation.validate_nbf = false;
+		validation.required_spec_claims.clear();
 
-		let decoded_token: ZitadelJWT = payload.try_into()?;
+		let decoded = decode::<JwtPayload>(&jwt, &decoding_key, &validation)?;
+		let decoded_token: ZitadelJWT = decoded.claims.try_into()?;
 
 		assert_eq!(parsed_token, decoded_token);
 
@@ -362,14 +391,14 @@ mod tests {
 
 	#[test]
 	fn test_unknown_role() -> Result<()> {
-		let token = JwtPayload::from_map(payload_fixture_unknown_role())?;
+		let token = jwt_payload(payload_fixture_unknown_role())?;
 		let parsed_token: ZitadelJWT = token.clone().try_into()?;
 
 		let decoded_token: JwtPayload = parsed_token.try_into()?;
 
 		assert_eq!(
-			token.claim("roles").expect("Missing roles claim"),
-			decoded_token.claim("roles").expect("Missing roles claim")
+			token.claims().get("roles").expect("Missing roles claim"),
+			decoded_token.claims().get("roles").expect("Missing roles claim")
 		);
 
 		Ok(())

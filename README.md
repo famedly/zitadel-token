@@ -51,7 +51,7 @@ where `UserRole` is an arbitrary string, but some conventional values are: `TimP
 
    ```rust
    // Convert a JwtPayload into a ZitadelJWT
-   let jwt_payload = JwtPayload::new();
+   let jwt_payload: JwtPayload = serde_json::from_value(payload)?;
    let token: ZitadelJWT = jwt_payload.try_into()?;
    ```
 
@@ -59,12 +59,9 @@ where `UserRole` is an arbitrary string, but some conventional values are: `TimP
    You can sign your token with a private key to create a JWT string:
 
    ```rust
-   // Generate a private key and set a key id
-   let mut private_key = Jwk::generate_rsa_key(2048)?;
-   private_key.set_key_id("123456");
-
-   // Convert and sign the ZitadelJWT into a JWT string
-   let jwt = token.to_jwt(&private_key)?;
+   // Load an RSA private key and sign with a key id
+   let private_key = EncodingKey::from_rsa_pem(include_bytes!("private.pem"))?;
+   let jwt = token.to_jwt(&private_key, "123456")?;
    ```
 
 ## Tests
