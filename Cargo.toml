@@ -4,7 +4,6 @@ version = "0.2.2"
 authors = []
 edition = "2024"
 resolver = "2"
-publish = ["famedly"]
 
 [dependencies]
 serde = { version = "1.0.219", features = ["derive"] }

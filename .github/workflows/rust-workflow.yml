@@ -24,10 +24,10 @@ jobs:
     uses: famedly/backend-build-workflows/.github/workflows/publish-crate.yml@v5
     secrets:
       CRATE_REGISTRY_SSH_PRIVKEY: ${{ secrets.CI_SSH_PRIVATE_KEY }}
-      CRATE_REGISTRY_AUTH_TOKEN: ${{ secrets.SHIPYARD_RS_TOKEN }}
+      CRATE_REGISTRY_AUTH_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
     with:
-      crate_registry_name: famedly
-      crate_registry_index_url: ssh://git@ssh.shipyard.rs/famedly/crate-index.git
+      crate_registry_name: crates-io
+      crate_registry_index_url: https://github.com/rust-lang/crates.io-index
   check:
     uses: famedly/backend-build-workflows/.github/workflows/rust-workflow.yml@466f5192d20b5dc7b20718daf5652fbdcbb4c44e
     with:
