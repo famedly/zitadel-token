@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2] - 2026-09-22
+
+### Bug Fixes
+
+- Update old workflow pins
+
 ## [0.2.1] - 2026-09-22
 
 ### 🐛 Bug Fixes
