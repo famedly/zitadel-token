@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1] - 2026-09-22
+
+### 🐛 Bug Fixes
+
+- CI
+
+### Miscellaneous Tasks
+
+- Change code owner
+
 All notable changes to this project will be documented in this file.
 
 ## [0.2.0] - 2026-09-18
