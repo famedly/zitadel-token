@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "zitadel-token"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "famedly-zitadel-rust-client",
