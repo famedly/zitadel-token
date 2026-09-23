@@ -21,12 +21,10 @@ env:
 jobs:
   publish:
     needs: check
-    uses: famedly/backend-build-workflows/.github/workflows/publish-crate.yml@466f5192d20b5dc7b20718daf5652fbdcbb4c44e
+    uses: famedly/backend-build-workflows/.github/workflows/publish-crate.yml@v1
     secrets:
-      CRATE_REGISTRY_SSH_PRIVKEY: ${{ secrets.CI_SSH_PRIVATE_KEY }}
-      CRATE_REGISTRY_AUTH_TOKEN: ${{ secrets.SHIPYARD_RS_TOKEN }}
+      CI_SSH_PRIVATE_KEY: ${{ secrets.CI_SSH_PRIVATE_KEY }}
+      registry-auth-token: ${{ secrets.SHIPYARD_RS_TOKEN }}
   check:
-    uses: famedly/backend-build-workflows/.github/workflows/rust-workflow.yml@466f5192d20b5dc7b20718daf5652fbdcbb4c44e
-    with:
-      ref: 466f5192d20b5dc7b20718daf5652fbdcbb4c44e
+    uses: famedly/backend-build-workflows/.github/workflows/rust-workflow.yml@v1
     secrets: inherit
