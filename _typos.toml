@@ -1,0 +1,7 @@
+[files]
+extend-exclude = ["*.key"]
+
+[default.extend-words]
+famedlycontrol = "famedlycontrol"
+# JWT `typ` header field (token type).
+typ = "typ"
