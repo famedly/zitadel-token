@@ -1,0 +1,2 @@
+[registries.famedly]
+index = "ssh://git@ssh.shipyard.rs/famedly/crate-index.git"
