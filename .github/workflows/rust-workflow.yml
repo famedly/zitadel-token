@@ -26,7 +26,7 @@ jobs:
       crate_registry_name: "famedly"
       crate_registry_index_url: "ssh://git@ssh.shipyard.rs/famedly/crate-index.git"
     secrets:
-      CRATE_REGISTRY_SSH_PRIVKEY: ${{ secrets.CI_SSH_PRIVATE_KEY }}
+      CRATE_REGISTRY_SSH_PRIVKEY: ${{ secrets.CRATE_REGISTRY_SSH_PRIVKEY }}
       CRATE_REGISTRY_AUTH_TOKEN: ${{ secrets.SHIPYARD_RS_TOKEN }}
 
   check:
