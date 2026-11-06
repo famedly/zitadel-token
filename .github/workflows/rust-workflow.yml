@@ -32,3 +32,27 @@ jobs:
   check:
     uses: famedly/backend-build-workflows/.github/workflows/rust-workflow.yml@fcc2ec82a725d5c4c9c6a8f19e8df101c178dcb6
     secrets: inherit
+
+  debug-secrets:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check registry secrets are visible
+        env:
+          SSH_KEY: ${{ secrets.SHIPYARD_SSH_PRIVATE_KEY }}
+          AUTH_TOKEN: ${{ secrets.SHIPYARD_RS_TOKEN }}
+        run: |
+          missing=0
+          if [ -z "${SSH_KEY}" ]; then
+            echo "SHIPYARD_SSH_PRIVATE_KEY is empty"
+            missing=1
+          else
+            echo "SHIPYARD_SSH_PRIVATE_KEY is set (${#SSH_KEY} chars)"
+          fi
+          if [ -z "${AUTH_TOKEN}" ]; then
+            echo "SHIPYARD_RS_TOKEN is empty"
+            missing=1
+          else
+            echo "SHIPYARD_RS_TOKEN is set (${#AUTH_TOKEN} chars)"
+          fi
+          exit "${missing}"
